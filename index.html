@@ -180,8 +180,8 @@
       <h2>Maps</h2>
       <div class="maps">
         <div class="map">
-          <canvas class="thumb" id="thumb-albedo" title="Click to download"></canvas>
-          <div class="name">Albedo</div>
+          <canvas class="thumb" id="thumb-pattern" title="Click to download"></canvas>
+          <div class="name">Pattern</div>
         </div>
         <div class="map">
           <canvas class="thumb" id="thumb-normal" title="Click to download"></canvas>
@@ -220,18 +220,6 @@
         <input type="range" id="grain" min="0" max="1" step="0.05" value="0.25" />
         <span class="val" id="grain-v">0.25</span>
       </div>
-      <div class="row">
-        <label>Pentagons</label>
-        <input type="color" id="cPenta" value="#0c0c0e" />
-      </div>
-      <div class="row">
-        <label>Hexagons</label>
-        <input type="color" id="cHex" value="#f4f4f0" />
-      </div>
-      <div class="row">
-        <label>Accent panels</label>
-        <input type="color" id="cAccent" value="#f4f4f0" />
-      </div>
     </div>
 
     <div class="section">
@@ -266,13 +254,13 @@
     <div class="section">
       <h2>Export</h2>
       <div class="btns">
-        <button class="act primary" id="dl-countries">⚽ Download all teams (.zip)</button>
-        <button class="act" id="dl-all">Current ball — all maps</button>
-        <button class="act" id="dl-albedo">Albedo .png</button>
+        <button class="act primary" id="dl-countries">⚽ Download all maps (.zip)</button>
+        <button class="act" id="dl-all">Shared maps — pattern + normal + bump</button>
+        <button class="act" id="dl-pattern">Pattern .png</button>
         <button class="act" id="dl-normal">Normal .png</button>
         <button class="act" id="dl-bump">Bump .png</button>
       </div>
-      <div class="hint">“All teams” bakes the shared normal + bump once and one albedo per nation, zipped together. Maps are equirectangular (2:1); apply albedo→map, normal→normalMap, bump→bumpMap.</div>
+      <div class="hint">Every team shares 3 textures: <b>pattern</b> (R=shade, G=panel class), <b>normal</b>, <b>bump</b>, plus a <b>palette</b> texture (one row per team) and <b>palette.json</b>. Colour is resolved per-instance in the shader. Maps are equirectangular (2:1).</div>
     </div>
 
     <div class="foot">True truncated icosahedron · smooth-inflated panels · World Cup 2026 colourways.</div>
@@ -481,15 +469,20 @@ function bakeGeometry(W, H, seamW, grain, onProgress) {
   });
 }
 
-// ---- cheap recolour: albedo canvas from the baked class + shade and a palette ----
-function colorizeAlbedo(W, H, cls, shade, palette) {
-  const cols = palette.map(hexToRgb);
+// ---- shared, colour-INDEPENDENT pattern texture. R = albedo shade (seam × AO ×
+//      grain), G = panel class (0/1/2 → 0/128/255 = pentagon/hexagon/accent). The
+//      actual colour is resolved per-instance in the shader from the palette
+//      texture, so this single texture is shared by every team. ----
+const CLASS_G = [0, 128, 255];
+function buildPattern(W, H, cls, shade) {
   const img = new ImageData(W, H);
   for (let y = 0; y < H; y++) {
     for (let x = 0; x < W; x++) {
       const idx = y * W + x, o = idx * 4;
-      const base = cols[cls[idx]], s = shade[idx], da = dither(x, y, 3);
-      img.data[o] = base[0] * s + da; img.data[o + 1] = base[1] * s + da; img.data[o + 2] = base[2] * s + da; img.data[o + 3] = 255;
+      img.data[o]     = shade[idx] * 255 + dither(x, y, 3);
+      img.data[o + 1] = CLASS_G[cls[idx]];
+      img.data[o + 2] = 0;
+      img.data[o + 3] = 255;
     }
   }
   const c = document.createElement('canvas'); c.width = W; c.height = H;
@@ -532,20 +525,22 @@ function buildBump(W, H, height) {
   return c;
 }
 
-// Cache the colour-independent bake (geometry + normal + bump). A team or colour
-// change keeps the same key, so only the cheap albedo recolour runs → instant swap.
+// The whole map set (pattern + normal + bump) is now colour-INDEPENDENT and shared
+// by every ball, so we cache it by key and reuse it directly — colour lives in the
+// palette texture + shader, not in these maps.
 let geoCache = null;
 function generateTextures(opts, onDone) {
   const W = opts.res, H = opts.res / 2;
   const key = `${opts.res}|${opts.seam}|${opts.grain}|${opts.depth}`;
-  const finish = c => onDone({
-    albedo: colorizeAlbedo(W, H, c.cls, c.shade, [opts.cPenta, opts.cHex, opts.cAccent]),
-    normal: c.normal, bump: c.bump, W, H,
-  });
-  if (geoCache && geoCache.key === key) { finish(geoCache); return; }
+  if (geoCache && geoCache.key === key) { onDone(geoCache); return; }
   bakeGeometry(W, H, opts.seam, opts.grain).then(({ height, cls, shade }) => {
-    geoCache = { key, cls, shade, normal: buildNormal(W, H, height, opts.depth), bump: buildBump(W, H, height) };
-    finish(geoCache);
+    geoCache = {
+      key, W, H,
+      pattern: buildPattern(W, H, cls, shade),
+      normal: buildNormal(W, H, height, opts.depth),
+      bump: buildBump(W, H, height),
+    };
+    onDone(geoCache);
   });
 }
 
@@ -563,14 +558,15 @@ view.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e0f13);
 
-const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 100);
-camera.position.set(0, 0.12, 7.5);
+const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 200);
+camera.position.set(0, 0, 14);   // re-framed to the grid once it is built (see frameGrid)
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 2.2;
-controls.maxDistance = 11;
+controls.minDistance = 5;
+controls.maxDistance = 32;
+controls.target.set(0, 0, 0);
 
 // environment for nice PBR reflections
 const pmrem = new THREE.PMREMGenerator(renderer);
@@ -580,22 +576,18 @@ const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(3, 4, 5)
 const rim = new THREE.DirectionalLight(0x9bb3ff, 1.2); rim.position.set(-4, 2, -3); scene.add(rim);
 scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-// Two balls so a team change can roll a fresh one in to replace the current one.
-const ballGeo = new THREE.SphereGeometry(1.15, 256, 128);
-const makeBallMat = () => {
-  const m = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.0 });
-  m.envMapIntensity = 0.6;
-  return m;
+// One shared material + one InstancedMesh hold every ball. The material, mesh and
+// grid are built later, once the team palette is known (search "INSTANCED FIELD").
+// These custom uniforms are shared by reference across every compiled shader
+// variant so updates survive detail-mode recompiles.
+const customUniforms = {
+  uPalette:   { value: null },   // 3×N palette texture (filled when teams load)
+  uTeamCount: { value: 1 },      // N rows
+  uTime:      { value: 0 },      // spin angle
+  uFocus:     { value: -1 },     // highlighted team row, -1 = none
 };
-const balls = [new THREE.Mesh(ballGeo, makeBallMat()), new THREE.Mesh(ballGeo, makeBallMat())];
-balls.forEach(b => scene.add(b));
-balls[1].visible = false;
-let activeIdx = 0;
-const activeBall = () => balls[activeIdx];
-let swap = null;                              // in-flight swap transition
-const SWAP_D = 6.2, SWAP_ROLL = SWAP_D / 1.15;
-
-let maps = null;          // { albedo, normal, bump } canvases for export
+let mat = null, mesh = null;     // assigned in the INSTANCED FIELD section
+let maps = null;                 // { pattern, normal, bump, W, H } for export / thumbs
 
 function makeTex(canvas, srgb) {
   const t = new THREE.CanvasTexture(canvas);
@@ -605,39 +597,25 @@ function makeTex(canvas, srgb) {
   return t;
 }
 
-function applyToMaterial(mat, result) {
-  mat.map = makeTex(result.albedo, true);
+// Reassign the 3 shared maps on the single material (dispose the old GPU textures).
+function applyToMaterial(result) {
+  mat.map?.dispose?.();
+  mat.userData.normalTex?.dispose?.();
+  mat.userData.bumpTex?.dispose?.();
+  mat.map = makeTex(result.pattern, false);     // R=shade, G=class — data, NoColorSpace
   mat.userData.normalTex = makeTex(result.normal, false);
   mat.userData.bumpTex = makeTex(result.bump, false);
   applyDetail(mat);
 }
 
-function startSwap(result) {
-  if (swap) finishSwap();                     // snap any in-flight swap to done first
-  const inIdx = 1 - activeIdx;
-  const incoming = balls[inIdx], outgoing = balls[activeIdx];
-  applyToMaterial(incoming.material, result);
-  incoming.visible = true;
-  incoming.position.set(SWAP_D, 0, 0);
-  incoming.rotation.set(0, outgoing.rotation.y, SWAP_ROLL);
-  swap = { t: 0, dur: 0.7, inIdx, outIdx: activeIdx };
-}
-function finishSwap() {
-  const out = balls[swap.outIdx], inc = balls[swap.inIdx];
-  out.visible = false; out.position.set(0, 0, 0); out.rotation.z = 0;
-  inc.position.set(0, 0, 0); inc.rotation.z = 0;
-  activeIdx = swap.inIdx;
-  swap = null;
-}
-
-function applyMaps(result, doSwap) {
+function applyMaps(result) {
   maps = result;
-  drawThumb('thumb-albedo', result.albedo);
+  drawThumb('thumb-pattern', result.pattern);
   drawThumb('thumb-normal', result.normal);
   drawThumb('thumb-bump', result.bump);
-  document.getElementById('genstat').textContent = `${result.W}×${result.H} maps ready`;
-  if (doSwap && activeBall().material.map) startSwap(result);   // roll a new ball in
-  else applyToMaterial(activeBall().material, result);          // first load / live tweak: in place
+  document.getElementById('genstat').textContent = `${result.W}×${result.H} maps ready · ${customUniforms.uTeamCount.value} teams`;
+  applyToMaterial(result);
+  if (mesh) mesh.visible = true;                // reveal once the first maps are ready
 }
 
 function drawThumb(id, src) {
@@ -653,41 +631,39 @@ function drawThumb(id, src) {
 --------------------------------------------------------------------------- */
 const ui = {
   res: 2048, seam: 0.010, depth: 0.4, grain: 0.25,
-  cPenta: '#0c0c0e', cHex: '#f4f4f0', cAccent: '#f4f4f0',
   detail: 'normal', strength: 2.1, rough: 0.35, spin: true,
 };
 
 let regenTimer = null;
-function scheduleRegen(doSwap) {
+function scheduleRegen() {
   document.getElementById('genstat').textContent = 'generating textures…';
   clearTimeout(regenTimer);
   regenTimer = setTimeout(() => {
     generateTextures(
-      { res: ui.res, seam: ui.seam, depth: ui.depth, grain: ui.grain,
-        cPenta: ui.cPenta, cHex: ui.cHex, cAccent: ui.cAccent },
-      result => applyMaps(result, !!doSwap)
+      { res: ui.res, seam: ui.seam, depth: ui.depth, grain: ui.grain },
+      applyMaps
     );
   }, 120);
 }
 
-function applyDetail(mat) {
-  const nt = mat.userData.normalTex, bt = mat.userData.bumpTex;
+function applyDetail(m) {
+  const nt = m.userData.normalTex, bt = m.userData.bumpTex;
   if (ui.detail === 'normal') {
-    mat.normalMap = nt || null;
-    mat.normalScale = new THREE.Vector2(ui.strength, ui.strength);
-    mat.bumpMap = null;
+    m.normalMap = nt || null;
+    m.normalScale = new THREE.Vector2(ui.strength, ui.strength);
+    m.bumpMap = null;
   } else if (ui.detail === 'bump') {
-    mat.bumpMap = bt || null;
-    mat.bumpScale = ui.strength * 0.04;
-    mat.normalMap = null;
+    m.bumpMap = bt || null;
+    m.bumpScale = ui.strength * 0.04;
+    m.normalMap = null;
   } else {
-    mat.normalMap = null;
-    mat.bumpMap = null;
+    m.normalMap = null;
+    m.bumpMap = null;
   }
-  mat.roughness = ui.rough;
-  mat.needsUpdate = true;
+  m.roughness = ui.rough;
+  m.needsUpdate = true;
 }
-function refreshDetailMode() { balls.forEach(b => applyDetail(b.material)); }
+function refreshDetailMode() { if (mat) applyDetail(mat); }
 
 function bindRange(id, key, fmt) {
   const el = document.getElementById(id);
@@ -708,17 +684,6 @@ bindRange('rough', 'rough', v => v.toFixed(2));
 document.getElementById('res').addEventListener('change', e => {
   ui.res = parseInt(e.target.value); scheduleRegen();
 });
-// manual colour edits deselect the active team chip (now a custom palette)
-function bindColor(id, key) {
-  document.getElementById(id).addEventListener('input', e => {
-    ui[key] = e.target.value;
-    document.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
-    scheduleRegen();
-  });
-}
-bindColor('cPenta', 'cPenta');
-bindColor('cHex', 'cHex');
-bindColor('cAccent', 'cAccent');
 
 /* ---------------------------------------------------------------------------
    Teams — the 48-nation FIFA World Cup 2026 field. Each palette is
@@ -796,13 +761,119 @@ const PALETTES = { 'Classic': CLASSIC };
 // Flatten into a single ordered list of chips. "Classic" is a pseudo-group first.
 const CHIPS = [['All', null], ['Classic', ['Classic', '⚽', CLASSIC]]];
 const GROUPS = ['All', 'Classic'];
+const TEAM_ROWS = [['Classic', CLASSIC]];     // ordered [name, palette] — row 0 = Classic
 for (const [group, list] of Object.entries(TEAMS)) {
   GROUPS.push(group);
   for (const [name, flag, palette] of list) {
     PALETTES[name] = palette;
     CHIPS.push([group, [name, flag, palette]]);
+    TEAM_ROWS.push([name, palette]);
   }
 }
+const N = TEAM_ROWS.length;
+const paletteIndex = {};                       // teamName -> palette row index
+TEAM_ROWS.forEach(([name], i) => { paletteIndex[name] = i; });
+
+/* ---------------------------------------------------------------------------
+   Palette texture — every team's 3 flag colours stored in pixels: a 3×N image,
+   column 0/1/2 = pentagon/hexagon/accent, row = team. Built once. The shader
+   resolves each instance's colour from here, so all balls share one texture set.
+--------------------------------------------------------------------------- */
+const paletteBytes = new Uint8Array(3 * N * 4);
+TEAM_ROWS.forEach(([, pal], r) => {
+  for (let c = 0; c < 3; c++) {
+    const [R, G, B] = hexToRgb(pal[c]), o = (r * 3 + c) * 4;
+    paletteBytes[o] = R; paletteBytes[o + 1] = G; paletteBytes[o + 2] = B; paletteBytes[o + 3] = 255;
+  }
+});
+const paletteTex = new THREE.DataTexture(paletteBytes, 3, N, THREE.RGBAFormat);
+paletteTex.colorSpace = THREE.NoColorSpace;          // sRGB bytes; decoded in-shader
+paletteTex.minFilter = paletteTex.magFilter = THREE.LinearFilter;   // blends seam colours
+paletteTex.generateMipmaps = false;
+paletteTex.wrapS = paletteTex.wrapT = THREE.ClampToEdgeWrapping;
+paletteTex.needsUpdate = true;
+customUniforms.uPalette.value = paletteTex;
+customUniforms.uTeamCount.value = N;
+
+function buildPaletteCanvas() {     // for PNG export
+  const img = new ImageData(new Uint8ClampedArray(paletteBytes), 3, N);
+  const c = document.createElement('canvas'); c.width = 3; c.height = N;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+/* ---------------------------------------------------------------------------
+   INSTANCED FIELD — one SphereGeometry + one MeshStandardMaterial render all N
+   teams in a single draw call. Per-instance aTeamId selects the palette row;
+   aPhase offsets the in-shader spin. Colour = sRGBToLinear(paletteColour × shade).
+--------------------------------------------------------------------------- */
+const COLS = 8, SP = 1.5, SCALE = 0.55;
+const ROWS = Math.ceil(N / COLS);
+const ballGeo = new THREE.SphereGeometry(1, 96, 48);
+
+mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: ui.rough, metalness: 0 });
+mat.envMapIntensity = 0.6;
+mat.customProgramCacheKey = () => 'instancedTeamPalette';
+mat.onBeforeCompile = (shader) => {
+  shader.uniforms.uPalette   = customUniforms.uPalette;
+  shader.uniforms.uTeamCount = customUniforms.uTeamCount;
+  shader.uniforms.uTime      = customUniforms.uTime;
+  shader.uniforms.uFocus     = customUniforms.uFocus;
+
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>',
+      '#include <common>\n attribute float aTeamId; attribute float aPhase; varying float vTeamId; uniform float uTime;')
+    .replace('#include <beginnormal_vertex>',
+      '#include <beginnormal_vertex>\n { float a = uTime + aPhase, c = cos(a), s = sin(a);'
+      + ' objectNormal = vec3(c*objectNormal.x + s*objectNormal.z, objectNormal.y, -s*objectNormal.x + c*objectNormal.z); }')
+    .replace('#include <begin_vertex>',
+      '#include <begin_vertex>\n vTeamId = aTeamId;\n { float a = uTime + aPhase, c = cos(a), s = sin(a);'
+      + ' transformed = vec3(c*transformed.x + s*transformed.z, transformed.y, -s*transformed.x + c*transformed.z); }');
+
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>',
+      '#include <common>\n uniform sampler2D uPalette; uniform float uTeamCount; uniform float uFocus; varying float vTeamId;\n'
+      + ' vec3 srgbToLin(vec3 col){ return mix( pow((col + 0.055) / 1.055, vec3(2.4)), col / 12.92, vec3(lessThanEqual(col, vec3(0.04045))) ); }')
+    .replace('#include <map_fragment>', `
+      vec4 patt = texture2D( map, vMapUv );                 // R = shade, G = class (0/.5/1)
+      float shade = patt.r;
+      float palX  = (patt.g * 2.0 + 0.5) / 3.0;             // 0->col0, .5->col1, 1->col2
+      vec3 teamColSRGB = texture2D( uPalette, vec2( palX, (vTeamId + 0.5) / uTeamCount ) ).rgb;
+      vec3 albedoSRGB  = teamColSRGB * shade;               // shade in sRGB space == old colorizeAlbedo
+      float dim = (uFocus >= 0.0 && abs(uFocus - vTeamId) > 0.5) ? 0.4 : 1.0;
+      diffuseColor.rgb *= srgbToLin(albedoSRGB) * dim;
+    `);
+};
+
+mesh = new THREE.InstancedMesh(ballGeo, mat, N);
+mesh.visible = false;          // shown once the first maps bake
+mesh.frustumCulled = false;    // instances spread well beyond the origin bounding sphere
+const ids = new Float32Array(N), phases = new Float32Array(N);
+const _m = new THREE.Matrix4();
+for (let i = 0; i < N; i++) {
+  const col = i % COLS, row = Math.floor(i / COLS);
+  const x = (col - (COLS - 1) / 2) * SP;
+  const y = ((ROWS - 1) / 2 - row) * SP;
+  _m.makeScale(SCALE, SCALE, SCALE); _m.setPosition(x, y, 0);
+  mesh.setMatrixAt(i, _m);
+  ids[i] = i;
+  phases[i] = (i * 1.2345) % (Math.PI * 2);     // deterministic per-ball spin offset
+}
+ballGeo.setAttribute('aTeamId', new THREE.InstancedBufferAttribute(ids, 1));
+ballGeo.setAttribute('aPhase',  new THREE.InstancedBufferAttribute(phases, 1));
+mesh.instanceMatrix.needsUpdate = true;
+scene.add(mesh);
+
+// frame the whole grid (binding constraint of the two axes for the current aspect)
+function frameGrid() {
+  const halfH = ((ROWS - 1) * SP) / 2 + SCALE;
+  const halfW = ((COLS - 1) * SP) / 2 + SCALE;
+  const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  const aspect = view.clientWidth / view.clientHeight;
+  return Math.max(halfH / t, halfW / (t * aspect)) * 1.12;
+}
+camera.position.set(0, 0, frameGrid());
+controls.maxDistance = frameGrid() * 1.6;
 
 const groupsEl = document.getElementById('teambar-groups');
 const chipsEl = document.getElementById('teambar-chips');
@@ -850,16 +921,16 @@ function filterChips() {
   }
 }
 
+// Chips highlight their ball in the grid (dim the rest) via the uFocus uniform.
+let focusRow = -1;
 function selectTeam(name, chip) {
-  const pal = PALETTES[name];
-  if (!pal) return;
-  [ui.cPenta, ui.cHex, ui.cAccent] = pal;
-  document.getElementById('cPenta').value = ui.cPenta;
-  document.getElementById('cHex').value = ui.cHex;
-  document.getElementById('cAccent').value = ui.cAccent;
-  chipEls.forEach(c => c.classList.toggle('active', c === chip));
-  if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-  scheduleRegen(true);            // roll a fresh ball in
+  const row = paletteIndex[name];
+  if (row === undefined) return;
+  const same = focusRow === row;
+  focusRow = same ? -1 : row;                 // re-clicking the active chip clears focus
+  customUniforms.uFocus.value = focusRow;
+  chipEls.forEach(c => c.classList.toggle('active', !same && c === chip));
+  if (!same && chip) chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
 }
 
 searchEl.addEventListener('input', () => {
@@ -869,9 +940,6 @@ searchEl.addEventListener('input', () => {
   }
   filterChips();
 });
-
-// start on Classic
-chipEls[0].classList.add('active');
 
 document.querySelectorAll('#detail-mode button').forEach(b => {
   b.addEventListener('click', () => {
@@ -903,17 +971,17 @@ function download(canvas, name) {
 }
 const dl = (which, name) => { if (maps) download(maps[which], name); };
 
-document.getElementById('dl-albedo').onclick = () => dl('albedo', 'football_albedo.png');
-document.getElementById('dl-normal').onclick = () => dl('normal', 'football_normal.png');
-document.getElementById('dl-bump').onclick   = () => dl('bump', 'football_bump.png');
+document.getElementById('dl-pattern').onclick = () => dl('pattern', 'football_pattern.png');
+document.getElementById('dl-normal').onclick  = () => dl('normal', 'football_normal.png');
+document.getElementById('dl-bump').onclick    = () => dl('bump', 'football_bump.png');
 document.getElementById('dl-all').onclick = () => {
-  dl('albedo', 'football_albedo.png');
+  dl('pattern', 'football_pattern.png');
   setTimeout(() => dl('normal', 'football_normal.png'), 250);
   setTimeout(() => dl('bump', 'football_bump.png'), 500);
 };
-document.getElementById('thumb-albedo').onclick = () => dl('albedo', 'football_albedo.png');
-document.getElementById('thumb-normal').onclick = () => dl('normal', 'football_normal.png');
-document.getElementById('thumb-bump').onclick   = () => dl('bump', 'football_bump.png');
+document.getElementById('thumb-pattern').onclick = () => dl('pattern', 'football_pattern.png');
+document.getElementById('thumb-normal').onclick  = () => dl('normal', 'football_normal.png');
+document.getElementById('thumb-bump').onclick    = () => dl('bump', 'football_bump.png');
 
 // --- minimal store-only ZIP writer (PNGs are already compressed) ---
 const CRC_TABLE = (() => {
@@ -948,31 +1016,35 @@ const canvasPng = c => new Promise(res => c.toBlob(async b => res(new Uint8Array
 const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
 const setStat = t => { document.getElementById('genstat').textContent = t; };
 
-// Bake the (shared) geometry once, recolour the albedo for every team, and pack
-// everything — normal + bump + one albedo per nation — into a single .zip.
-async function exportAllCountries() {
+// Bake the shared map set once and pack it with the palette texture + index into a
+// single .zip — the instance-based pipeline: 3 shared maps + 1 palette for every team.
+async function exportAllMaps() {
   const btn = document.getElementById('dl-countries');
   btn.disabled = true;
   try {
     const W = ui.res, H = ui.res / 2;
     setStat('baking geometry…');
     const { height, cls, shade } = await bakeGeometry(W, H, ui.seam, ui.grain, p => setStat(`baking geometry ${Math.round(p * 100)}%`));
+    setStat('building maps…');
     const files = [
-      { name: 'shared/normal.png', data: await canvasPng(buildNormal(W, H, height, ui.depth)) },
-      { name: 'shared/bump.png', data: await canvasPng(buildBump(W, H, height)) },
+      { name: 'shared/pattern.png', data: await canvasPng(buildPattern(W, H, cls, shade)) },
+      { name: 'shared/normal.png',  data: await canvasPng(buildNormal(W, H, height, ui.depth)) },
+      { name: 'shared/bump.png',    data: await canvasPng(buildBump(W, H, height)) },
+      { name: 'shared/palette.png', data: await canvasPng(buildPaletteCanvas()) },
+      { name: 'palette.json',       data: new TextEncoder().encode(JSON.stringify(paletteIndex, null, 2)) },
+      { name: 'README.txt', data: new TextEncoder().encode(
+        'FIFA World Cup 2026 — instance-based procedural soccer-ball maps\n\n' +
+        'Every team shares ONE map set. Colour is resolved per team in the shader.\n\n' +
+        'shared/pattern.png : R = albedo shade, G = panel class (0/128/255 = pentagon/hexagon/accent). B unused.\n' +
+        'shared/normal.png  : tangent-space normal map (shared).\n' +
+        'shared/bump.png    : height/bump map (shared).\n' +
+        'shared/palette.png : 3 x ' + N + ' px; column 0/1/2 = pentagon/hexagon/accent colour, row = team (sRGB).\n' +
+        'palette.json       : { teamName: rowIndex } into palette.png.\n\n' +
+        'Resolve per team in a shader:\n' +
+        '  col    = sample(palette, vec2((classCol+0.5)/3, (teamRow+0.5)/N))   // sRGB\n' +
+        '  albedo = sRGBToLinear(col * pattern.R)\n' +
+        `Maps are equirectangular (2:1), ${W}x${H}.\n`) },
     ];
-    const teams = [['Classic', '⚽', CLASSIC], ...Object.values(TEAMS).flat()];
-    for (let i = 0; i < teams.length; i++) {
-      const [name, , pal] = teams[i];
-      setStat(`rendering albedo ${i + 1}/${teams.length}: ${name}`);
-      files.push({ name: `albedo/${slug(name)}_albedo.png`, data: await canvasPng(colorizeAlbedo(W, H, cls, shade, pal)) });
-      await new Promise(r => requestAnimationFrame(r)); // keep UI alive
-    }
-    files.push({ name: 'README.txt', data: new TextEncoder().encode(
-      'FIFA World Cup 2026 — procedural soccer-ball PBR maps\n\n' +
-      'shared/normal.png + shared/bump.png are identical for every team.\n' +
-      'albedo/<country>_albedo.png is that nation\'s kit/flag colourway.\n' +
-      `Resolution: ${W}x${H}, equirectangular (2:1). Apply albedo->map, normal->normalMap, bump->bumpMap.\n`) });
     setStat('packing zip…');
     const blob = makeZip(files);
     const a = document.createElement('a');
@@ -980,14 +1052,14 @@ async function exportAllCountries() {
     a.download = 'worldcup2026_ball_textures.zip';
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 6000);
-    setStat(`exported ${teams.length} teams + shared maps`);
+    setStat(`exported shared maps + ${N}-team palette`);
   } catch (err) {
     console.error(err); setStat('export failed — see console');
   } finally {
     btn.disabled = false;
   }
 }
-document.getElementById('dl-countries').onclick = exportAllCountries;
+document.getElementById('dl-countries').onclick = exportAllMaps;
 
 /* ---------------------------------------------------------------------------
    6. Loop
@@ -1001,19 +1073,12 @@ function onResize() {
 window.addEventListener('resize', onResize);
 
 const clock = new THREE.Clock();
-const easeOutCubic = k => 1 - Math.pow(1 - k, 3);
+let spinT = 0;
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
-  if (ui.spin) { const s = dt * 0.4; balls[0].rotation.y += s; balls[1].rotation.y += s; }
-  if (swap) {
-    swap.t += dt / swap.dur;
-    const e = easeOutCubic(Math.min(1, swap.t));
-    const inc = balls[swap.inIdx], out = balls[swap.outIdx];
-    inc.position.x = SWAP_D * (1 - e);  inc.rotation.z = SWAP_ROLL * (1 - e);   // rolls in from the right
-    out.position.x = -SWAP_D * e;       out.rotation.z = -SWAP_ROLL * e;        // rolls out to the left
-    if (swap.t >= 1) finishSwap();
-  }
+  if (ui.spin) spinT += dt * 0.4;     // every ball spins in place via the vertex shader
+  customUniforms.uTime.value = spinT;
   controls.update();
   renderer.render(scene, camera);
 }
