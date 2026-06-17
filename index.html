@@ -559,13 +559,13 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e0f13);
 
 const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 100);
-camera.position.set(0, 0.12, 3.35);
+camera.position.set(0, 0.12, 7.5);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
 controls.minDistance = 2.2;
-controls.maxDistance = 8;
+controls.maxDistance = 11;
 
 // environment for nice PBR reflections
 const pmrem = new THREE.PMREMGenerator(renderer);
