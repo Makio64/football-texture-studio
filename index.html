@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Football — 3D Texture Studio</title>
+<style>
+  :root {
+    --bg: #0e0f13;
+    --panel: #16181f;
+    --panel-2: #1d2029;
+    --line: #2a2e3a;
+    --text: #e7e9ee;
+    --muted: #8a91a3;
+    --accent: #5b8cff;
+    --accent-2: #36d399;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    overflow: hidden;
+  }
+  #app { display: flex; height: 100vh; }
+  #view { position: relative; flex: 1 1 auto; min-width: 0; }
+  #view canvas { display: block; }
+  #hud {
+    position: absolute; top: 16px; left: 16px;
+    font-size: 12px; color: var(--muted);
+    pointer-events: none; line-height: 1.5;
+  }
+  #hud b { color: var(--text); font-weight: 600; }
+
+  #panel {
+    width: 320px; flex: 0 0 320px;
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+  }
+  .head { padding: 18px 18px 14px; border-bottom: 1px solid var(--line); }
+  .head h1 { margin: 0; font-size: 15px; letter-spacing: .2px; }
+  .head p { margin: 4px 0 0; font-size: 12px; color: var(--muted); }
+
+  .section { padding: 16px 18px; border-bottom: 1px solid var(--line); }
+  .section h2 {
+    margin: 0 0 12px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: 1px; color: var(--muted); font-weight: 600;
+  }
+
+  .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; gap: 10px; }
+  .row:last-child { margin-bottom: 0; }
+  .row label { font-size: 13px; color: var(--text); }
+  .row .val { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  input[type="range"] { width: 140px; accent-color: var(--accent); }
+  input[type="color"] {
+    width: 34px; height: 24px; border: 1px solid var(--line); border-radius: 6px;
+    background: none; padding: 0; cursor: pointer;
+  }
+  select {
+    background: var(--panel-2); color: var(--text); border: 1px solid var(--line);
+    border-radius: 6px; padding: 5px 8px; font-size: 13px;
+  }
+  #country { max-width: 190px; }
+
+  .switch { display: inline-flex; gap: 6px; }
+  .switch button {
+    background: var(--panel-2); color: var(--muted); border: 1px solid var(--line);
+    padding: 5px 10px; font-size: 12px; border-radius: 6px; cursor: pointer;
+  }
+  .switch button.active { color: var(--text); border-color: var(--accent); background: #1a2236; }
+
+  .maps { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+  .map { display: flex; flex-direction: column; gap: 6px; }
+  .map .thumb {
+    width: 100%; aspect-ratio: 2 / 1; border-radius: 6px; border: 1px solid var(--line);
+    background: #000; image-rendering: auto; cursor: pointer;
+  }
+  .map .name { font-size: 10px; color: var(--muted); text-align: center; text-transform: uppercase; letter-spacing: .5px; }
+
+  .btns { display: flex; flex-direction: column; gap: 8px; }
+  button.act {
+    width: 100%; padding: 9px 12px; border-radius: 8px; cursor: pointer;
+    border: 1px solid var(--line); background: var(--panel-2); color: var(--text);
+    font-size: 13px; font-weight: 500; transition: .12s;
+  }
+  button.act:hover { border-color: var(--accent); }
+  button.act.primary { background: var(--accent); border-color: var(--accent); color: #06122e; font-weight: 600; }
+  button.act.primary:hover { filter: brightness(1.08); }
+
+  .hint { font-size: 11px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+  .foot { padding: 14px 18px; font-size: 11px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="view">
+    <div id="hud">
+      <b>Football — 3D Texture Studio</b><br />
+      drag to orbit · scroll to zoom<br />
+      <span id="genstat">generating textures…</span>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <div class="head">
+      <h1>⚽ Texture Studio</h1>
+      <p>Procedural soccer ball · PBR maps · PNG export</p>
+    </div>
+
+    <div class="section">
+      <h2>Maps</h2>
+      <div class="maps">
+        <div class="map">
+          <canvas class="thumb" id="thumb-albedo" title="Click to download"></canvas>
+          <div class="name">Albedo</div>
+        </div>
+        <div class="map">
+          <canvas class="thumb" id="thumb-normal" title="Click to download"></canvas>
+          <div class="name">Normal</div>
+        </div>
+        <div class="map">
+          <canvas class="thumb" id="thumb-bump" title="Click to download"></canvas>
+          <div class="name">Bump</div>
+        </div>
+      </div>
+      <div class="hint">Click any thumbnail to download that map.</div>
+    </div>
+
+    <div class="section">
+      <h2>Team · World Cup 2026</h2>
+      <div class="row">
+        <label>Country</label>
+        <select id="country"></select>
+      </div>
+      <div class="hint">The 48-nation field. Pick a team to recolour the ball in its kit / flag colours — the pattern stays the same, only the albedo changes.</div>
+    </div>
+
+    <div class="section">
+      <h2>Pattern</h2>
+      <div class="row">
+        <label>Resolution</label>
+        <select id="res">
+          <option value="1024">1024 × 512</option>
+          <option value="2048" selected>2048 × 1024</option>
+          <option value="4096">4096 × 2048</option>
+        </select>
+      </div>
+      <div class="row">
+        <label>Seam width</label>
+        <input type="range" id="seam" min="0.01" max="0.10" step="0.005" value="0.010" />
+        <span class="val" id="seam-v">0.010</span>
+      </div>
+      <div class="row">
+        <label>Groove depth</label>
+        <input type="range" id="depth" min="0.2" max="3.0" step="0.1" value="0.4" />
+        <span class="val" id="depth-v">0.4</span>
+      </div>
+      <div class="row">
+        <label>Panel grain</label>
+        <input type="range" id="grain" min="0" max="1" step="0.05" value="0.25" />
+        <span class="val" id="grain-v">0.25</span>
+      </div>
+      <div class="row">
+        <label>Pentagons</label>
+        <input type="color" id="cPenta" value="#0c0c0e" />
+      </div>
+      <div class="row">
+        <label>Hexagons</label>
+        <input type="color" id="cHex" value="#f4f4f0" />
+      </div>
+      <div class="row">
+        <label>Accent panels</label>
+        <input type="color" id="cAccent" value="#f4f4f0" />
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Material</h2>
+      <div class="row">
+        <label>Surface detail</label>
+        <div class="switch" id="detail-mode">
+          <button data-mode="normal" class="active">Normal</button>
+          <button data-mode="bump">Bump</button>
+          <button data-mode="none">Flat</button>
+        </div>
+      </div>
+      <div class="row">
+        <label>Detail strength</label>
+        <input type="range" id="strength" min="0" max="3" step="0.1" value="2.1" />
+        <span class="val" id="strength-v">2.1</span>
+      </div>
+      <div class="row">
+        <label>Roughness</label>
+        <input type="range" id="rough" min="0" max="1" step="0.05" value="0.35" />
+        <span class="val" id="rough-v">0.35</span>
+      </div>
+      <div class="row">
+        <label>Auto-rotate</label>
+        <div class="switch" id="spin-mode">
+          <button data-spin="1" class="active">On</button>
+          <button data-spin="0">Off</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h2>Export</h2>
+      <div class="btns">
+        <button class="act primary" id="dl-countries">⚽ Download all teams (.zip)</button>
+        <button class="act" id="dl-all">Current ball — all maps</button>
+        <button class="act" id="dl-albedo">Albedo .png</button>
+        <button class="act" id="dl-normal">Normal .png</button>
+        <button class="act" id="dl-bump">Bump .png</button>
+      </div>
+      <div class="hint">“All teams” bakes the shared normal + bump once and one albedo per nation, zipped together. Maps are equirectangular (2:1); apply albedo→map, normal→normalMap, bump→bumpMap.</div>
+    </div>
+
+    <div class="foot">True truncated icosahedron · smooth-inflated panels · World Cup 2026 colourways.</div>
+  </aside>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+
+/* ---------------------------------------------------------------------------
+   1. Geometry of the soccer-ball pattern — a TRUE truncated icosahedron.
+   We build the real polyhedron (60 vertices, 90 edges, 32 faces) and walk its
+   edge graph to recover the 12 pentagon + 20 hexagon faces. The seam field is
+   then the exact angular distance to a face's real polygon edges — not a
+   Voronoi approximation (which would shrink the pentagons).
+--------------------------------------------------------------------------- */
+const PHI = (1 + Math.sqrt(5)) / 2;
+
+function norm(v) {
+  const l = Math.hypot(v[0], v[1], v[2]);
+  return [v[0] / l, v[1] / l, v[2] / l];
+}
+const vdot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const vsub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const vscale = (a, s) => [a[0] * s, a[1] * s, a[2] * s];
+const vcross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+
+// 60 vertices: even (cyclic) permutations of
+// (0,±1,±3φ), (±1,±(2+φ),±2φ), (±φ,±2,±(2φ+1)).
+function truncIcosaVerts() {
+  const f = PHI, out = [];
+  const cyc = (a, b, c) => { out.push([a, b, c], [b, c, a], [c, a, b]); };
+  for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) cyc(0, s1, s2 * 3 * f);
+  for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) for (const s3 of [-1, 1]) cyc(s1, s2 * (2 + f), s3 * 2 * f);
+  for (const s1 of [-1, 1]) for (const s2 of [-1, 1]) for (const s3 of [-1, 1]) cyc(s1 * f, s2 * 2, s3 * (2 * f + 1));
+  return out.map(norm);
+}
+const TI_VERTS = truncIcosaVerts();
+const vdist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+
+// adjacency: the 3 nearest vertices (all edges share one length)
+const NBR = TI_VERTS.map((v, i) =>
+  TI_VERTS.map((w, j) => [vdist(v, w), j]).filter(p => p[1] !== i)
+    .sort((a, b) => a[0] - b[0]).slice(0, 3).map(p => p[1]));
+
+// project p into the tangent plane at vertex v (=its own position) and normalize
+function tangentDir(vi, pi) {
+  const v = TI_VERTS[vi];
+  const d = vsub(TI_VERTS[pi], v);
+  return norm(vsub(d, vscale(v, vdot(d, v))));
+}
+// next edge when walking a face CCW (smallest left turn around vertex v)
+function nextInFace(u, v) {
+  const n = TI_VERTS[v];
+  const ref = tangentDir(v, u);
+  let best = -1, bestAng = Infinity;
+  for (const w of NBR[v]) {
+    if (w === u) continue;
+    const t = tangentDir(v, w);
+    let ang = Math.atan2(vdot(vcross(ref, t), n), vdot(ref, t));
+    if (ang < 0) ang += 2 * Math.PI;
+    if (ang < bestAng) { bestAng = ang; best = w; }
+  }
+  return best;
+}
+
+// walk the edge graph to enumerate all 32 faces, then precompute per-face data
+const FACES = (() => {
+  const seen = new Set(), faces = [];
+  for (let u = 0; u < TI_VERTS.length; u++) for (const v of NBR[u]) {
+    if (seen.has(u + '>' + v)) continue;
+    const idx = []; let a = u, b = v, guard = 0;
+    do { seen.add(a + '>' + b); idx.push(a); const c = nextInFace(a, b); a = b; b = c; }
+    while (!(a === u && b === v) && ++guard < 12);
+    const vs = idx.map(i => TI_VERTS[i]);
+    const center = norm(vs.reduce((s, p) => [s[0] + p[0], s[1] + p[1], s[2] + p[2]], [0, 0, 0]));
+    const edges = [];
+    for (let i = 0; i < vs.length; i++) {
+      let nrm = norm(vcross(vs[i], vs[(i + 1) % vs.length]));
+      if (vdot(nrm, center) < 0) nrm = [-nrm[0], -nrm[1], -nrm[2]];  // interior dot > 0
+      edges.push(nrm);
+    }
+    // stable per-face random in [0,1) — used to scatter accent-coloured panels
+    const r = Math.abs(Math.sin(center[0] * 12.9898 + center[1] * 78.233 + center[2] * 37.719) * 43758.5453);
+    faces.push({ center, edges, isPenta: vs.length === 5, rnd: r - Math.floor(r) });
+  }
+  return faces;
+})();
+
+const insideFace = (f, d) => { for (const n of f.edges) if (vdot(n, d) < -1e-6) return false; return true; };
+
+// For a direction, return its containing face (with edge planes + center) so the
+// height field can be built smoothly per panel — no min(), so no medial creases.
+function faceOf(d) {
+  let bi = 0, bd = -2;
+  for (let i = 0; i < FACES.length; i++) { const dd = vdot(d, FACES[i].center); if (dd > bd) { bd = dd; bi = i; } }
+  let f = FACES[bi];
+  if (!insideFace(f, d)) { for (const c of FACES) if (insideFace(c, d)) { f = c; break; } }
+  return f;
+}
+
+/* ---------------------------------------------------------------------------
+   2. Texture generation (runs off the main thread feel — chunked)
+   For each equirectangular texel we find the nearest + second-nearest site.
+   The angular gap between them gives the distance to the panel seam, which
+   drives albedo shading, a height (bump) field and a derived normal map.
+--------------------------------------------------------------------------- */
+function dirFromUV(u, v) {
+  const lon = (u - 0.5) * Math.PI * 2;
+  const lat = (0.5 - v) * Math.PI;
+  const cl = Math.cos(lat);
+  return [cl * Math.sin(lon), Math.sin(lat), cl * Math.cos(lon)];
+}
+
+// cheap value-noise for leather grain
+function hash2(x, y) {
+  let h = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
+  return h - Math.floor(h);
+}
+function vnoise(x, y) {
+  const xi = Math.floor(x), yi = Math.floor(y);
+  const xf = x - xi, yf = y - yi;
+  const u = xf * xf * (3 - 2 * xf), w = yf * yf * (3 - 2 * yf);
+  const a = hash2(xi, yi), b = hash2(xi + 1, yi);
+  const c = hash2(xi, yi + 1), d = hash2(xi + 1, yi + 1);
+  return a + (b - a) * u + (c - a) * w + (a - b - c + d) * u * w;
+}
+function fbm(x, y) {
+  let s = 0, amp = 0.5, f = 1;
+  for (let i = 0; i < 4; i++) { s += amp * vnoise(x * f, y * f); f *= 2; amp *= 0.5; }
+  return s;
+}
+
+function smoothstep(e0, e1, x) {
+  const t = Math.min(1, Math.max(0, (x - e0) / (e1 - e0)));
+  return t * t * (3 - 2 * t);
+}
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+// Triangular-PDF dither (~1 LSB, centred at 0). Added to a value that the
+// canvas then ROUNDS to nearest — this is the correct way to dissolve 8-bit
+// banding on smooth gradients without visible structure. k varies per channel.
+function hashf(x, y, k) {
+  const s = Math.sin(x * 12.9898 + y * 78.233 + k * 37.719) * 43758.5453;
+  return s - Math.floor(s);
+}
+const DITHER = 1.25;
+const dither = (x, y, k = 0) => (hashf(x, y, k * 2 + 1) + hashf(x, y, k * 2 + 2) - 1) * DITHER;
+
+const clamp1 = v => Math.max(-1, Math.min(1, v));
+
+// ---- colour-independent bake (the expensive part): height field + per-texel
+//      panel class (0=penta,1=hex,2=accent) + albedo shade. Chunked so the UI
+//      can show progress. Returns a promise. ----
+function bakeGeometry(W, H, seamW, grain, onProgress) {
+  const height = new Float32Array(W * H);   // 0 = groove bottom, 1 = panel top
+  const cls = new Uint8Array(W * H);        // panel colour class
+  const shade = new Float32Array(W * H);    // albedo shading (seam line + AO + grain)
+  return new Promise(resolve => {
+    const rows = 48; let y = 0;
+    function step() {
+      const end = Math.min(H, y + rows);
+      for (; y < end; y++) {
+        const v = (y + 0.5) / H;
+        for (let x = 0; x < W; x++) {
+          const u = (x + 0.5) / W;
+          const d = dirFromUV(u, v);
+          const face = faceOf(d);
+          const idx = y * W + x;
+          const dc = Math.acos(clamp1(vdot(face.center, d)));
+          // height: radial dome × product of per-edge ramps (no min → no creases)
+          let mask = 1, bd = Infinity;
+          for (const n of face.edges) {
+            const de = Math.asin(clamp1(vdot(n, d)));
+            if (de < bd) bd = de;
+            mask *= smoothstep(0, seamW, de);
+          }
+          const dome = Math.cos(Math.min(dc * 2.0, Math.PI * 0.5));
+          const g = fbm(u * 240, v * 120);
+          height[idx] = (dome * mask) * (1 - grain * 0.12) + grain * 0.12 * g * mask;
+          cls[idx] = face.isPenta ? 0 : (face.rnd < 0.34 ? 2 : 1);
+          const seamLine = smoothstep(0, seamW * 0.7, bd);
+          const ao = 0.55 + 0.45 * smoothstep(0, seamW * 2.6, bd);
+          const mott = 1 - grain * 0.10 * (g - 0.5) * 2;
+          shade[idx] = seamLine * ao * mott;
+        }
+      }
+      if (onProgress) onProgress(y / H);
+      if (y < H) requestAnimationFrame(step);
+      else resolve({ height, cls, shade });
+    }
+    requestAnimationFrame(step);
+  });
+}
+
+// ---- cheap recolour: albedo canvas from the baked class + shade and a palette ----
+function colorizeAlbedo(W, H, cls, shade, palette) {
+  const cols = palette.map(hexToRgb);
+  const img = new ImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x, o = idx * 4;
+      const base = cols[cls[idx]], s = shade[idx], da = dither(x, y, 3);
+      img.data[o] = base[0] * s + da; img.data[o + 1] = base[1] * s + da; img.data[o + 2] = base[2] * s + da; img.data[o + 3] = 255;
+    }
+  }
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+function buildNormal(W, H, height, depth) {
+  const img = new ImageData(W, H);
+  for (let y = 0; y < H; y++) {
+    const cosLat = Math.max(0.15, Math.cos((0.5 - (y + 0.5) / H) * Math.PI));
+    for (let x = 0; x < W; x++) {
+      const idx = y * W + x;
+      const xl = (x - 1 + W) % W, xr = (x + 1) % W;
+      const yu = Math.max(0, y - 1), yd = Math.min(H - 1, y + 1);
+      const dx = (height[y * W + xr] - height[y * W + xl]) * depth * 6 / cosLat;
+      const dy = (height[yd * W + x] - height[yu * W + x]) * depth * 6;
+      let nx = -dx, ny = -dy, nz = 1;
+      const l = Math.hypot(nx, ny, nz); nx /= l; ny /= l; nz /= l;
+      const o = idx * 4;
+      img.data[o]     = (nx * 0.5 + 0.5) * 255 + dither(x, y, 0);
+      img.data[o + 1] = (ny * 0.5 + 0.5) * 255 + dither(x, y, 1);
+      img.data[o + 2] = (nz * 0.5 + 0.5) * 255 + dither(x, y, 2);
+      img.data[o + 3] = 255;
+    }
+  }
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+function buildBump(W, H, height) {
+  const img = new ImageData(W, H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const idx = y * W + x, o = idx * 4, hv = height[idx] * 255 + dither(x, y);
+    img.data[o] = hv; img.data[o + 1] = hv; img.data[o + 2] = hv; img.data[o + 3] = 255;
+  }
+  const c = document.createElement('canvas'); c.width = W; c.height = H;
+  c.getContext('2d').putImageData(img, 0, 0);
+  return c;
+}
+
+function generateTextures(opts, onDone) {
+  const W = opts.res, H = opts.res / 2;
+  bakeGeometry(W, H, opts.seam, opts.grain).then(({ height, cls, shade }) => {
+    onDone({
+      albedo: colorizeAlbedo(W, H, cls, shade, [opts.cPenta, opts.cHex, opts.cAccent]),
+      normal: buildNormal(W, H, height, opts.depth),
+      bump: buildBump(W, H, height),
+      W, H,
+    });
+  });
+}
+
+/* ---------------------------------------------------------------------------
+   3. Three.js scene
+--------------------------------------------------------------------------- */
+const view = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(view.clientWidth, view.clientHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.05;
+view.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0e0f13);
+
+const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 100);
+camera.position.set(0, 0.4, 4.2);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.08;
+controls.minDistance = 2.4;
+controls.maxDistance = 8;
+
+// environment for nice PBR reflections
+const pmrem = new THREE.PMREMGenerator(renderer);
+scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+
+const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(3, 4, 5); scene.add(key);
+const rim = new THREE.DirectionalLight(0x9bb3ff, 1.2); rim.position.set(-4, 2, -3); scene.add(rim);
+scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+
+const ballMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.0 });
+ballMat.envMapIntensity = 0.6;
+const ball = new THREE.Mesh(new THREE.SphereGeometry(1.15, 256, 128), ballMat);
+scene.add(ball);
+
+let maps = null;          // { albedo, normal, bump } canvases
+let texAlbedo, texNormal, texBump;
+
+function makeTex(canvas, srgb) {
+  const t = new THREE.CanvasTexture(canvas);
+  t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  t.wrapS = THREE.RepeatWrapping;
+  return t;
+}
+
+function applyMaps(result) {
+  maps = result;
+  texAlbedo = makeTex(result.albedo, true);
+  texNormal = makeTex(result.normal, false);
+  texBump   = makeTex(result.bump, false);
+  ballMat.map = texAlbedo;
+  refreshDetailMode();
+  ballMat.needsUpdate = true;
+  // thumbnails
+  drawThumb('thumb-albedo', result.albedo);
+  drawThumb('thumb-normal', result.normal);
+  drawThumb('thumb-bump', result.bump);
+  document.getElementById('genstat').textContent =
+    `${result.W}×${result.H} maps ready`;
+}
+
+function drawThumb(id, src) {
+  const c = document.getElementById(id);
+  const ctx = c.getContext('2d');
+  const w = c.width = c.clientWidth * devicePixelRatio;
+  const h = c.height = c.clientHeight * devicePixelRatio;
+  ctx.drawImage(src, 0, 0, w, h);
+}
+
+/* ---------------------------------------------------------------------------
+   4. Controls
+--------------------------------------------------------------------------- */
+const ui = {
+  res: 2048, seam: 0.010, depth: 0.4, grain: 0.25,
+  cPenta: '#0c0c0e', cHex: '#f4f4f0', cAccent: '#f4f4f0',
+  detail: 'normal', strength: 2.1, rough: 0.35, spin: true,
+};
+
+let regenTimer = null;
+function scheduleRegen() {
+  document.getElementById('genstat').textContent = 'generating textures…';
+  clearTimeout(regenTimer);
+  regenTimer = setTimeout(() => {
+    generateTextures(
+      { res: ui.res, seam: ui.seam, depth: ui.depth, grain: ui.grain,
+        cPenta: ui.cPenta, cHex: ui.cHex, cAccent: ui.cAccent },
+      applyMaps
+    );
+  }, 120);
+}
+
+function refreshDetailMode() {
+  if (!texNormal) return;
+  if (ui.detail === 'normal') {
+    ballMat.normalMap = texNormal;
+    ballMat.normalScale = new THREE.Vector2(ui.strength, ui.strength);
+    ballMat.bumpMap = null;
+  } else if (ui.detail === 'bump') {
+    ballMat.bumpMap = texBump;
+    ballMat.bumpScale = ui.strength * 0.04;
+    ballMat.normalMap = null;
+  } else {
+    ballMat.normalMap = null;
+    ballMat.bumpMap = null;
+  }
+  ballMat.roughness = ui.rough;
+  ballMat.needsUpdate = true;
+}
+
+function bindRange(id, key, fmt) {
+  const el = document.getElementById(id);
+  const out = document.getElementById(id + '-v');
+  el.addEventListener('input', () => {
+    ui[key] = parseFloat(el.value);
+    if (out) out.textContent = fmt ? fmt(ui[key]) : ui[key];
+    if (['seam', 'depth', 'grain'].includes(key)) scheduleRegen();
+    else refreshDetailMode();
+  });
+}
+bindRange('seam', 'seam', v => v.toFixed(3));
+bindRange('depth', 'depth', v => v.toFixed(1));
+bindRange('grain', 'grain', v => v.toFixed(2));
+bindRange('strength', 'strength', v => v.toFixed(1));
+bindRange('rough', 'rough', v => v.toFixed(2));
+
+document.getElementById('res').addEventListener('change', e => {
+  ui.res = parseInt(e.target.value); scheduleRegen();
+});
+// manual colour edits switch the team selector back to "Custom"
+function bindColor(id, key) {
+  document.getElementById(id).addEventListener('input', e => {
+    ui[key] = e.target.value;
+    document.getElementById('country').value = '__custom';
+    scheduleRegen();
+  });
+}
+bindColor('cPenta', 'cPenta');
+bindColor('cHex', 'cHex');
+bindColor('cAccent', 'cAccent');
+
+/* ---------------------------------------------------------------------------
+   Teams — the 48-nation FIFA World Cup 2026 field. Each palette is
+   [pentagons, hexagons, accent-hexagons], drawn from the nation's kit / flag.
+--------------------------------------------------------------------------- */
+const TEAMS = {
+  'Hosts': [
+    ['United States', '🇺🇸', ['#0A3161', '#FFFFFF', '#B31942']],
+    ['Mexico', '🇲🇽', ['#006847', '#FFFFFF', '#CE1126']],
+    ['Canada', '🇨🇦', ['#D80621', '#FFFFFF', '#D80621']],
+  ],
+  'Europe': [
+    ['France', '🇫🇷', ['#002654', '#FFFFFF', '#ED2939']],
+    ['England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', ['#0A3161', '#FFFFFF', '#CE1124']],
+    ['Spain', '🇪🇸', ['#AA151B', '#F1BF00', '#AA151B']],
+    ['Germany', '🇩🇪', ['#000000', '#FFFFFF', '#DD0000']],
+    ['Portugal', '🇵🇹', ['#C8102E', '#006847', '#FFD700']],
+    ['Italy', '🇮🇹', ['#0067A3', '#FFFFFF', '#008C45']],
+    ['Netherlands', '🇳🇱', ['#AE1C28', '#FF7900', '#21468B']],
+    ['Belgium', '🇧🇪', ['#000000', '#FDDA24', '#EF3340']],
+    ['Croatia', '🇭🇷', ['#FF0000', '#FFFFFF', '#171796']],
+    ['Switzerland', '🇨🇭', ['#FFFFFF', '#D52B1E', '#FFFFFF']],
+    ['Denmark', '🇩🇰', ['#FFFFFF', '#C60C30', '#FFFFFF']],
+    ['Poland', '🇵🇱', ['#DC143C', '#FFFFFF', '#DC143C']],
+    ['Austria', '🇦🇹', ['#ED2939', '#FFFFFF', '#ED2939']],
+    ['Serbia', '🇷🇸', ['#0C4076', '#C6363C', '#FFFFFF']],
+    ['Ukraine', '🇺🇦', ['#0057B7', '#FFD700', '#0057B7']],
+    ['Norway', '🇳🇴', ['#00205B', '#BA0C2F', '#FFFFFF']],
+  ],
+  'South America': [
+    ['Brazil', '🇧🇷', ['#009C3B', '#FFDF00', '#002776']],
+    ['Argentina', '🇦🇷', ['#75AADB', '#FFFFFF', '#F6B40E']],
+    ['Uruguay', '🇺🇾', ['#5CBFEB', '#FFFFFF', '#FCD116']],
+    ['Colombia', '🇨🇴', ['#003893', '#FCD116', '#CE1126']],
+    ['Ecuador', '🇪🇨', ['#034EA2', '#FFDD00', '#ED1C24']],
+    ['Paraguay', '🇵🇾', ['#0038A8', '#FFFFFF', '#D52B1E']],
+    ['Peru', '🇵🇪', ['#D91023', '#FFFFFF', '#D91023']],
+    ['Chile', '🇨🇱', ['#0039A6', '#FFFFFF', '#D52B1E']],
+  ],
+  'North & Central America': [
+    ['Costa Rica', '🇨🇷', ['#002B7F', '#FFFFFF', '#CE1126']],
+    ['Jamaica', '🇯🇲', ['#000000', '#FED100', '#009B3A']],
+    ['Panama', '🇵🇦', ['#005293', '#FFFFFF', '#D21034']],
+    ['Honduras', '🇭🇳', ['#0073CF', '#FFFFFF', '#0073CF']],
+  ],
+  'Africa': [
+    ['Morocco', '🇲🇦', ['#006233', '#C1272D', '#006233']],
+    ['Senegal', '🇸🇳', ['#00853F', '#FDEF42', '#E31B23']],
+    ['Nigeria', '🇳🇬', ['#008751', '#FFFFFF', '#008751']],
+    ['Egypt', '🇪🇬', ['#000000', '#CE1126', '#FFFFFF']],
+    ['Ghana', '🇬🇭', ['#006B3F', '#FCD116', '#CE1126']],
+    ['Cameroon', '🇨🇲', ['#CE1126', '#007A5E', '#FCD116']],
+    ['Ivory Coast', '🇨🇮', ['#009E60', '#F77F00', '#FFFFFF']],
+    ['Algeria', '🇩🇿', ['#006233', '#FFFFFF', '#D21034']],
+    ['Tunisia', '🇹🇳', ['#FFFFFF', '#E70013', '#FFFFFF']],
+    ['South Africa', '🇿🇦', ['#007749', '#FFB81C', '#DE3831']],
+  ],
+  'Asia': [
+    ['Japan', '🇯🇵', ['#0033A0', '#FFFFFF', '#BC002D']],
+    ['South Korea', '🇰🇷', ['#0047A0', '#FFFFFF', '#CD2E3A']],
+    ['Iran', '🇮🇷', ['#DA0000', '#FFFFFF', '#239F40']],
+    ['Saudi Arabia', '🇸🇦', ['#FFFFFF', '#006C35', '#FFFFFF']],
+    ['Australia', '🇦🇺', ['#00843D', '#FFCD00', '#00843D']],
+    ['Qatar', '🇶🇦', ['#FFFFFF', '#8A1538', '#FFFFFF']],
+    ['Uzbekistan', '🇺🇿', ['#1EB53A', '#FFFFFF', '#0099B5']],
+    ['Jordan', '🇯🇴', ['#000000', '#FFFFFF', '#CE1126']],
+  ],
+  'Oceania': [
+    ['New Zealand', '🇳🇿', ['#000000', '#FFFFFF', '#C8102E']],
+  ],
+};
+const CLASSIC = ['#0c0c0e', '#f4f4f0', '#f4f4f0'];
+const PALETTES = { '__classic': CLASSIC };
+
+const countrySel = document.getElementById('country');
+countrySel.innerHTML = '';
+const optClassic = new Option('⚽ Classic (black & white)', '__classic', true, true);
+countrySel.add(optClassic);
+const optCustom = new Option('🎨 Custom…', '__custom');
+countrySel.add(optCustom);
+for (const [group, list] of Object.entries(TEAMS)) {
+  const og = document.createElement('optgroup');
+  og.label = group;
+  for (const [name, flag, palette] of list) {
+    PALETTES[name] = palette;
+    og.appendChild(new Option(`${flag} ${name}`, name));
+  }
+  countrySel.add(og);
+}
+
+countrySel.addEventListener('change', e => {
+  const pal = PALETTES[e.target.value];
+  if (!pal) return;                       // "__custom" — keep current colours
+  [ui.cPenta, ui.cHex, ui.cAccent] = pal;
+  document.getElementById('cPenta').value = ui.cPenta;
+  document.getElementById('cHex').value = ui.cHex;
+  document.getElementById('cAccent').value = ui.cAccent;
+  scheduleRegen();
+});
+
+document.querySelectorAll('#detail-mode button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#detail-mode button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    ui.detail = b.dataset.mode;
+    refreshDetailMode();
+  });
+});
+document.querySelectorAll('#spin-mode button').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('#spin-mode button').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    ui.spin = b.dataset.spin === '1';
+  });
+});
+
+/* ---------------------------------------------------------------------------
+   5. Export
+--------------------------------------------------------------------------- */
+function download(canvas, name) {
+  canvas.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }, 'image/png');
+}
+const dl = (which, name) => { if (maps) download(maps[which], name); };
+
+document.getElementById('dl-albedo').onclick = () => dl('albedo', 'football_albedo.png');
+document.getElementById('dl-normal').onclick = () => dl('normal', 'football_normal.png');
+document.getElementById('dl-bump').onclick   = () => dl('bump', 'football_bump.png');
+document.getElementById('dl-all').onclick = () => {
+  dl('albedo', 'football_albedo.png');
+  setTimeout(() => dl('normal', 'football_normal.png'), 250);
+  setTimeout(() => dl('bump', 'football_bump.png'), 500);
+};
+document.getElementById('thumb-albedo').onclick = () => dl('albedo', 'football_albedo.png');
+document.getElementById('thumb-normal').onclick = () => dl('normal', 'football_normal.png');
+document.getElementById('thumb-bump').onclick   = () => dl('bump', 'football_bump.png');
+
+// --- minimal store-only ZIP writer (PNGs are already compressed) ---
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; }
+  return t;
+})();
+function crc32(b) { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = (c >>> 8) ^ CRC_TABLE[(c ^ b[i]) & 0xFF]; return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files) {
+  const enc = new TextEncoder();
+  const u16 = v => [v & 255, (v >> 8) & 255];
+  const u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >> 24) & 255];
+  const parts = [], central = []; let offset = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = f.data, crc = crc32(data);
+    const lh = new Uint8Array([...u32(0x04034b50), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)]);
+    parts.push(lh, name, data);
+    central.push(new Uint8Array([...u32(0x02014b50), ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(0), ...u16(0),
+      ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), name);
+    offset += lh.length + name.length + data.length;
+  }
+  let cdSize = 0; for (const c of central) cdSize += c.length;
+  const end = new Uint8Array([...u32(0x06054b50), ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(offset), ...u16(0)]);
+  const all = [...parts, ...central, end];
+  const total = all.reduce((s, a) => s + a.length, 0);
+  const out = new Uint8Array(total); let p = 0; for (const a of all) { out.set(a, p); p += a.length; }
+  return new Blob([out], { type: 'application/zip' });
+}
+
+const canvasPng = c => new Promise(res => c.toBlob(async b => res(new Uint8Array(await b.arrayBuffer())), 'image/png'));
+const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+const setStat = t => { document.getElementById('genstat').textContent = t; };
+
+// Bake the (shared) geometry once, recolour the albedo for every team, and pack
+// everything — normal + bump + one albedo per nation — into a single .zip.
+async function exportAllCountries() {
+  const btn = document.getElementById('dl-countries');
+  btn.disabled = true;
+  try {
+    const W = ui.res, H = ui.res / 2;
+    setStat('baking geometry…');
+    const { height, cls, shade } = await bakeGeometry(W, H, ui.seam, ui.grain, p => setStat(`baking geometry ${Math.round(p * 100)}%`));
+    const files = [
+      { name: 'shared/normal.png', data: await canvasPng(buildNormal(W, H, height, ui.depth)) },
+      { name: 'shared/bump.png', data: await canvasPng(buildBump(W, H, height)) },
+    ];
+    const teams = [['Classic', '⚽', CLASSIC], ...Object.values(TEAMS).flat()];
+    for (let i = 0; i < teams.length; i++) {
+      const [name, , pal] = teams[i];
+      setStat(`rendering albedo ${i + 1}/${teams.length}: ${name}`);
+      files.push({ name: `albedo/${slug(name)}_albedo.png`, data: await canvasPng(colorizeAlbedo(W, H, cls, shade, pal)) });
+      await new Promise(r => requestAnimationFrame(r)); // keep UI alive
+    }
+    files.push({ name: 'README.txt', data: new TextEncoder().encode(
+      'FIFA World Cup 2026 — procedural soccer-ball PBR maps\n\n' +
+      'shared/normal.png + shared/bump.png are identical for every team.\n' +
+      'albedo/<country>_albedo.png is that nation\'s kit/flag colourway.\n' +
+      `Resolution: ${W}x${H}, equirectangular (2:1). Apply albedo->map, normal->normalMap, bump->bumpMap.\n`) });
+    setStat('packing zip…');
+    const blob = makeZip(files);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'worldcup2026_ball_textures.zip';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 6000);
+    setStat(`exported ${teams.length} teams + shared maps`);
+  } catch (err) {
+    console.error(err); setStat('export failed — see console');
+  } finally {
+    btn.disabled = false;
+  }
+}
+document.getElementById('dl-countries').onclick = exportAllCountries;
+
+/* ---------------------------------------------------------------------------
+   6. Loop
+--------------------------------------------------------------------------- */
+function onResize() {
+  const w = view.clientWidth, h = view.clientHeight;
+  renderer.setSize(w, h);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', onResize);
+
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = clock.getDelta();
+  if (ui.spin) ball.rotation.y += dt * 0.4;
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// kick off first generation
+scheduleRegen();
+</script>
+</body>
+</html>
