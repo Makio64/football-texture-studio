@@ -532,15 +532,20 @@ function buildBump(W, H, height) {
   return c;
 }
 
+// Cache the colour-independent bake (geometry + normal + bump). A team or colour
+// change keeps the same key, so only the cheap albedo recolour runs → instant swap.
+let geoCache = null;
 function generateTextures(opts, onDone) {
   const W = opts.res, H = opts.res / 2;
+  const key = `${opts.res}|${opts.seam}|${opts.grain}|${opts.depth}`;
+  const finish = c => onDone({
+    albedo: colorizeAlbedo(W, H, c.cls, c.shade, [opts.cPenta, opts.cHex, opts.cAccent]),
+    normal: c.normal, bump: c.bump, W, H,
+  });
+  if (geoCache && geoCache.key === key) { finish(geoCache); return; }
   bakeGeometry(W, H, opts.seam, opts.grain).then(({ height, cls, shade }) => {
-    onDone({
-      albedo: colorizeAlbedo(W, H, cls, shade, [opts.cPenta, opts.cHex, opts.cAccent]),
-      normal: buildNormal(W, H, height, opts.depth),
-      bump: buildBump(W, H, height),
-      W, H,
-    });
+    geoCache = { key, cls, shade, normal: buildNormal(W, H, height, opts.depth), bump: buildBump(W, H, height) };
+    finish(geoCache);
   });
 }
 
@@ -575,13 +580,22 @@ const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(3, 4, 5)
 const rim = new THREE.DirectionalLight(0x9bb3ff, 1.2); rim.position.set(-4, 2, -3); scene.add(rim);
 scene.add(new THREE.AmbientLight(0xffffff, 0.25));
 
-const ballMat = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.0 });
-ballMat.envMapIntensity = 0.6;
-const ball = new THREE.Mesh(new THREE.SphereGeometry(1.15, 256, 128), ballMat);
-scene.add(ball);
+// Two balls so a team change can roll a fresh one in to replace the current one.
+const ballGeo = new THREE.SphereGeometry(1.15, 256, 128);
+const makeBallMat = () => {
+  const m = new THREE.MeshStandardMaterial({ roughness: 0.35, metalness: 0.0 });
+  m.envMapIntensity = 0.6;
+  return m;
+};
+const balls = [new THREE.Mesh(ballGeo, makeBallMat()), new THREE.Mesh(ballGeo, makeBallMat())];
+balls.forEach(b => scene.add(b));
+balls[1].visible = false;
+let activeIdx = 0;
+const activeBall = () => balls[activeIdx];
+let swap = null;                              // in-flight swap transition
+const SWAP_D = 6.2, SWAP_ROLL = SWAP_D / 1.15;
 
-let maps = null;          // { albedo, normal, bump } canvases
-let texAlbedo, texNormal, texBump;
+let maps = null;          // { albedo, normal, bump } canvases for export
 
 function makeTex(canvas, srgb) {
   const t = new THREE.CanvasTexture(canvas);
@@ -591,20 +605,39 @@ function makeTex(canvas, srgb) {
   return t;
 }
 
-function applyMaps(result) {
+function applyToMaterial(mat, result) {
+  mat.map = makeTex(result.albedo, true);
+  mat.userData.normalTex = makeTex(result.normal, false);
+  mat.userData.bumpTex = makeTex(result.bump, false);
+  applyDetail(mat);
+}
+
+function startSwap(result) {
+  if (swap) finishSwap();                     // snap any in-flight swap to done first
+  const inIdx = 1 - activeIdx;
+  const incoming = balls[inIdx], outgoing = balls[activeIdx];
+  applyToMaterial(incoming.material, result);
+  incoming.visible = true;
+  incoming.position.set(SWAP_D, 0, 0);
+  incoming.rotation.set(0, outgoing.rotation.y, SWAP_ROLL);
+  swap = { t: 0, dur: 0.7, inIdx, outIdx: activeIdx };
+}
+function finishSwap() {
+  const out = balls[swap.outIdx], inc = balls[swap.inIdx];
+  out.visible = false; out.position.set(0, 0, 0); out.rotation.z = 0;
+  inc.position.set(0, 0, 0); inc.rotation.z = 0;
+  activeIdx = swap.inIdx;
+  swap = null;
+}
+
+function applyMaps(result, doSwap) {
   maps = result;
-  texAlbedo = makeTex(result.albedo, true);
-  texNormal = makeTex(result.normal, false);
-  texBump   = makeTex(result.bump, false);
-  ballMat.map = texAlbedo;
-  refreshDetailMode();
-  ballMat.needsUpdate = true;
-  // thumbnails
   drawThumb('thumb-albedo', result.albedo);
   drawThumb('thumb-normal', result.normal);
   drawThumb('thumb-bump', result.bump);
-  document.getElementById('genstat').textContent =
-    `${result.W}×${result.H} maps ready`;
+  document.getElementById('genstat').textContent = `${result.W}×${result.H} maps ready`;
+  if (doSwap && activeBall().material.map) startSwap(result);   // roll a new ball in
+  else applyToMaterial(activeBall().material, result);          // first load / live tweak: in place
 }
 
 function drawThumb(id, src) {
@@ -625,35 +658,36 @@ const ui = {
 };
 
 let regenTimer = null;
-function scheduleRegen() {
+function scheduleRegen(doSwap) {
   document.getElementById('genstat').textContent = 'generating textures…';
   clearTimeout(regenTimer);
   regenTimer = setTimeout(() => {
     generateTextures(
       { res: ui.res, seam: ui.seam, depth: ui.depth, grain: ui.grain,
         cPenta: ui.cPenta, cHex: ui.cHex, cAccent: ui.cAccent },
-      applyMaps
+      result => applyMaps(result, !!doSwap)
     );
   }, 120);
 }
 
-function refreshDetailMode() {
-  if (!texNormal) return;
+function applyDetail(mat) {
+  const nt = mat.userData.normalTex, bt = mat.userData.bumpTex;
   if (ui.detail === 'normal') {
-    ballMat.normalMap = texNormal;
-    ballMat.normalScale = new THREE.Vector2(ui.strength, ui.strength);
-    ballMat.bumpMap = null;
+    mat.normalMap = nt || null;
+    mat.normalScale = new THREE.Vector2(ui.strength, ui.strength);
+    mat.bumpMap = null;
   } else if (ui.detail === 'bump') {
-    ballMat.bumpMap = texBump;
-    ballMat.bumpScale = ui.strength * 0.04;
-    ballMat.normalMap = null;
+    mat.bumpMap = bt || null;
+    mat.bumpScale = ui.strength * 0.04;
+    mat.normalMap = null;
   } else {
-    ballMat.normalMap = null;
-    ballMat.bumpMap = null;
+    mat.normalMap = null;
+    mat.bumpMap = null;
   }
-  ballMat.roughness = ui.rough;
-  ballMat.needsUpdate = true;
+  mat.roughness = ui.rough;
+  mat.needsUpdate = true;
 }
+function refreshDetailMode() { balls.forEach(b => applyDetail(b.material)); }
 
 function bindRange(id, key, fmt) {
   const el = document.getElementById(id);
@@ -698,12 +732,12 @@ const TEAMS = {
   ],
   'Europe': [
     ['France', '🇫🇷', ['#002654', '#FFFFFF', '#ED2939']],
-    ['England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', ['#0A3161', '#FFFFFF', '#CE1124']],
+    ['England', '🏴󠁧󠁢󠁥󠁮󠁧󠁿', ['#CE1124', '#FFFFFF', '#CE1124']],
     ['Spain', '🇪🇸', ['#AA151B', '#F1BF00', '#AA151B']],
-    ['Germany', '🇩🇪', ['#000000', '#FFFFFF', '#DD0000']],
+    ['Germany', '🇩🇪', ['#000000', '#FFCE00', '#DD0000']],
     ['Portugal', '🇵🇹', ['#C8102E', '#006847', '#FFD700']],
-    ['Italy', '🇮🇹', ['#0067A3', '#FFFFFF', '#008C45']],
-    ['Netherlands', '🇳🇱', ['#AE1C28', '#FF7900', '#21468B']],
+    ['Italy', '🇮🇹', ['#008C45', '#FFFFFF', '#CD212A']],
+    ['Netherlands', '🇳🇱', ['#FF6900', '#FFFFFF', '#21468B']],
     ['Belgium', '🇧🇪', ['#000000', '#FDDA24', '#EF3340']],
     ['Croatia', '🇭🇷', ['#FF0000', '#FFFFFF', '#171796']],
     ['Switzerland', '🇨🇭', ['#FFFFFF', '#D52B1E', '#FFFFFF']],
@@ -728,7 +762,7 @@ const TEAMS = {
     ['Costa Rica', '🇨🇷', ['#002B7F', '#FFFFFF', '#CE1126']],
     ['Jamaica', '🇯🇲', ['#000000', '#FED100', '#009B3A']],
     ['Panama', '🇵🇦', ['#005293', '#FFFFFF', '#D21034']],
-    ['Honduras', '🇭🇳', ['#0073CF', '#FFFFFF', '#0073CF']],
+    ['Honduras', '🇭🇳', ['#00B2E3', '#FFFFFF', '#00B2E3']],
   ],
   'Africa': [
     ['Morocco', '🇲🇦', ['#006233', '#C1272D', '#006233']],
@@ -825,7 +859,7 @@ function selectTeam(name, chip) {
   document.getElementById('cAccent').value = ui.cAccent;
   chipEls.forEach(c => c.classList.toggle('active', c === chip));
   if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
-  scheduleRegen();
+  scheduleRegen(true);            // roll a fresh ball in
 }
 
 searchEl.addEventListener('input', () => {
@@ -967,10 +1001,19 @@ function onResize() {
 window.addEventListener('resize', onResize);
 
 const clock = new THREE.Clock();
+const easeOutCubic = k => 1 - Math.pow(1 - k, 3);
 function animate() {
   requestAnimationFrame(animate);
   const dt = clock.getDelta();
-  if (ui.spin) ball.rotation.y += dt * 0.4;
+  if (ui.spin) { const s = dt * 0.4; balls[0].rotation.y += s; balls[1].rotation.y += s; }
+  if (swap) {
+    swap.t += dt / swap.dur;
+    const e = easeOutCubic(Math.min(1, swap.t));
+    const inc = balls[swap.inIdx], out = balls[swap.outIdx];
+    inc.position.x = SWAP_D * (1 - e);  inc.rotation.z = SWAP_ROLL * (1 - e);   // rolls in from the right
+    out.position.x = -SWAP_D * e;       out.rotation.z = -SWAP_ROLL * e;        // rolls out to the left
+    if (swap.t >= 1) finishSwap();
+  }
   controls.update();
   renderer.render(scene, camera);
 }
