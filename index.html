@@ -33,6 +33,64 @@
   }
   #hud b { color: var(--text); font-weight: 600; }
 
+  /* ---- floating team picker ---- */
+  #teambar {
+    position: absolute; left: 50%; bottom: 22px; transform: translateX(-50%);
+    width: min(900px, calc(100% - 48px));
+    background: rgba(18, 20, 26, 0.66);
+    backdrop-filter: blur(20px) saturate(1.4);
+    -webkit-backdrop-filter: blur(20px) saturate(1.4);
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 18px;
+    box-shadow: 0 16px 50px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+    padding: 12px 14px 13px;
+    display: flex; flex-direction: column; gap: 11px;
+    z-index: 6;
+  }
+  #teambar-tabs { display: flex; align-items: center; gap: 4px; }
+  #teambar-groups { display: flex; gap: 2px; flex-wrap: wrap; min-width: 0; }
+  .tab {
+    background: none; border: none; color: var(--muted);
+    font-size: 11.5px; font-weight: 500; letter-spacing: .2px;
+    padding: 5px 11px; border-radius: 9px; cursor: pointer; transition: .12s; white-space: nowrap;
+  }
+  .tab:hover { color: var(--text); background: rgba(255, 255, 255, 0.06); }
+  .tab.active { color: #06122e; background: var(--accent); }
+  #teamsearch {
+    margin-left: auto; flex: 0 0 auto;
+    background: rgba(0, 0, 0, 0.3); border: 1px solid var(--line);
+    border-radius: 9px; padding: 6px 11px; color: var(--text); font-size: 12px; width: 132px;
+    transition: .12s;
+  }
+  #teamsearch::placeholder { color: #6b7282; }
+  #teamsearch:focus { outline: none; border-color: var(--accent); width: 160px; }
+
+  #teambar-chips {
+    display: flex; gap: 8px; overflow-x: auto; padding-bottom: 3px;
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent;
+    scroll-behavior: smooth;
+  }
+  #teambar-chips::-webkit-scrollbar { height: 7px; }
+  #teambar-chips::-webkit-scrollbar-track { background: transparent; }
+  #teambar-chips::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.16); border-radius: 4px; }
+  .chip {
+    position: relative; flex: 0 0 auto;
+    display: flex; align-items: center; gap: 7px;
+    padding: 8px 13px 11px; border-radius: 12px;
+    background: rgba(255, 255, 255, 0.045); border: 1px solid var(--line);
+    color: var(--text); font-size: 12.5px; font-weight: 500; white-space: nowrap;
+    cursor: pointer; transition: transform .1s, background .12s, border-color .12s;
+  }
+  .chip:hover { background: rgba(255, 255, 255, 0.09); transform: translateY(-1px); }
+  .chip.active { border-color: var(--accent); background: rgba(91, 140, 255, 0.18); }
+  .chip .flag { font-size: 16px; line-height: 1; }
+  .chip .bar {
+    position: absolute; left: 11px; right: 11px; bottom: 5px; height: 3px;
+    display: flex; border-radius: 2px; overflow: hidden; opacity: .9;
+  }
+  .chip .bar i { flex: 1; }
+  .chip-hidden { display: none; }
+
   #panel {
     width: 320px; flex: 0 0 320px;
     background: var(--panel);
@@ -102,6 +160,14 @@
       drag to orbit · scroll to zoom<br />
       <span id="genstat">generating textures…</span>
     </div>
+
+    <div id="teambar">
+      <div id="teambar-tabs">
+        <div id="teambar-groups"></div>
+        <input id="teamsearch" type="text" placeholder="Search team…" autocomplete="off" spellcheck="false" />
+      </div>
+      <div id="teambar-chips"></div>
+    </div>
   </div>
 
   <aside id="panel">
@@ -127,15 +193,6 @@
         </div>
       </div>
       <div class="hint">Click any thumbnail to download that map.</div>
-    </div>
-
-    <div class="section">
-      <h2>Team · World Cup 2026</h2>
-      <div class="row">
-        <label>Country</label>
-        <select id="country"></select>
-      </div>
-      <div class="hint">The 48-nation field. Pick a team to recolour the ball in its kit / flag colours — the pattern stays the same, only the albedo changes.</div>
     </div>
 
     <div class="section">
@@ -502,12 +559,12 @@ const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x0e0f13);
 
 const camera = new THREE.PerspectiveCamera(40, view.clientWidth / view.clientHeight, 0.1, 100);
-camera.position.set(0, 0.4, 4.2);
+camera.position.set(0, 0.12, 3.35);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.08;
-controls.minDistance = 2.4;
+controls.minDistance = 2.2;
 controls.maxDistance = 8;
 
 // environment for nice PBR reflections
@@ -617,11 +674,11 @@ bindRange('rough', 'rough', v => v.toFixed(2));
 document.getElementById('res').addEventListener('change', e => {
   ui.res = parseInt(e.target.value); scheduleRegen();
 });
-// manual colour edits switch the team selector back to "Custom"
+// manual colour edits deselect the active team chip (now a custom palette)
 function bindColor(id, key) {
   document.getElementById(id).addEventListener('input', e => {
     ui[key] = e.target.value;
-    document.getElementById('country').value = '__custom';
+    document.querySelectorAll('.chip.active').forEach(c => c.classList.remove('active'));
     scheduleRegen();
   });
 }
@@ -700,33 +757,87 @@ const TEAMS = {
   ],
 };
 const CLASSIC = ['#0c0c0e', '#f4f4f0', '#f4f4f0'];
-const PALETTES = { '__classic': CLASSIC };
+const PALETTES = { 'Classic': CLASSIC };
 
-const countrySel = document.getElementById('country');
-countrySel.innerHTML = '';
-const optClassic = new Option('⚽ Classic (black & white)', '__classic', true, true);
-countrySel.add(optClassic);
-const optCustom = new Option('🎨 Custom…', '__custom');
-countrySel.add(optCustom);
+// Flatten into a single ordered list of chips. "Classic" is a pseudo-group first.
+const CHIPS = [['All', null], ['Classic', ['Classic', '⚽', CLASSIC]]];
+const GROUPS = ['All', 'Classic'];
 for (const [group, list] of Object.entries(TEAMS)) {
-  const og = document.createElement('optgroup');
-  og.label = group;
+  GROUPS.push(group);
   for (const [name, flag, palette] of list) {
     PALETTES[name] = palette;
-    og.appendChild(new Option(`${flag} ${name}`, name));
+    CHIPS.push([group, [name, flag, palette]]);
   }
-  countrySel.add(og);
 }
 
-countrySel.addEventListener('change', e => {
-  const pal = PALETTES[e.target.value];
-  if (!pal) return;                       // "__custom" — keep current colours
+const groupsEl = document.getElementById('teambar-groups');
+const chipsEl = document.getElementById('teambar-chips');
+const searchEl = document.getElementById('teamsearch');
+let activeGroup = 'All';
+
+// build group tabs
+for (const g of GROUPS) {
+  const b = document.createElement('button');
+  b.className = 'tab' + (g === 'All' ? ' active' : '');
+  b.textContent = g;
+  b.dataset.group = g;
+  b.addEventListener('click', () => {
+    activeGroup = g;
+    document.querySelectorAll('#teambar-groups .tab').forEach(t => t.classList.toggle('active', t.dataset.group === g));
+    searchEl.value = '';
+    filterChips();
+  });
+  groupsEl.appendChild(b);
+}
+
+// build chips
+const chipEls = [];
+for (const [group, entry] of CHIPS) {
+  if (group === 'All') continue;                 // 'All' is only a tab
+  const [name, flag, pal] = entry;
+  const chip = document.createElement('button');
+  chip.className = 'chip';
+  chip.dataset.team = name;
+  chip.dataset.group = group;
+  chip.innerHTML =
+    `<span class="flag">${flag}</span><span class="nm">${name}</span>` +
+    `<span class="bar"><i style="background:${pal[0]}"></i><i style="background:${pal[1]}"></i><i style="background:${pal[2]}"></i></span>`;
+  chip.addEventListener('click', () => selectTeam(name, chip));
+  chipsEl.appendChild(chip);
+  chipEls.push(chip);
+}
+
+function filterChips() {
+  const q = searchEl.value.trim().toLowerCase();
+  for (const c of chipEls) {
+    const okGroup = activeGroup === 'All' || c.dataset.group === activeGroup;
+    const okSearch = !q || c.dataset.team.toLowerCase().includes(q);
+    c.classList.toggle('chip-hidden', !(okGroup && okSearch));
+  }
+}
+
+function selectTeam(name, chip) {
+  const pal = PALETTES[name];
+  if (!pal) return;
   [ui.cPenta, ui.cHex, ui.cAccent] = pal;
   document.getElementById('cPenta').value = ui.cPenta;
   document.getElementById('cHex').value = ui.cHex;
   document.getElementById('cAccent').value = ui.cAccent;
+  chipEls.forEach(c => c.classList.toggle('active', c === chip));
+  if (chip) chip.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   scheduleRegen();
+}
+
+searchEl.addEventListener('input', () => {
+  if (searchEl.value.trim()) {                   // typing searches across all groups
+    activeGroup = 'All';
+    document.querySelectorAll('#teambar-groups .tab').forEach(t => t.classList.toggle('active', t.dataset.group === 'All'));
+  }
+  filterChips();
 });
+
+// start on Classic
+chipEls[0].classList.add('active');
 
 document.querySelectorAll('#detail-mode button').forEach(b => {
   b.addEventListener('click', () => {

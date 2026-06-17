@@ -4,8 +4,6 @@ A single-file, in-browser 3D soccer-ball visualizer that **generates its own PBR
 
 **Live demo:** https://romainherve.github.io/football-texture-studio/
 
-![Football Texture Studio](https://romainherve.github.io/football-texture-studio/)
-
 ## What it does
 
 - **Real geometry.** The ball is a *true truncated icosahedron* (60 vertices, 90 edges, 12 pentagons + 20 hexagons), built by walking the polyhedron's edge graph — not a Voronoi approximation, so the panels are correctly sized.
@@ -14,7 +12,7 @@ A single-file, in-browser 3D soccer-ball visualizer that **generates its own PBR
   - **Bump** — the panel height field.
   - **Normal** — derived from the height gradient (with longitude-distortion correction).
 - **Smoothly inflated panels.** Each panel is a radial dome × a product of per-edge ramps — curved across the whole panel with no flat facets and no medial-axis creases. Triangular-PDF dithering removes 8-bit banding even at high detail strength.
-- **World Cup 2026 teams.** Pick any of the 48 nations to recolour the ball in its kit/flag palette (pentagons / hexagons / scattered accent panels).
+- **World Cup 2026 teams.** A floating team picker (confederation tabs + search) lets you recolour the ball in any of the 48 nations' kit/flag palettes (pentagons / hexagons / scattered accent panels).
 - **Export.** Download individual maps, the current ball's full set, or **every team** as a single zip (shared normal + bump, one albedo per nation).
 
 ## Run locally
